@@ -1,3 +1,9 @@
+# Instructions for George:
+locate the file: src/models/converting-pytroch-jax/convert_experiments.ipynb
+the changes that need to be made will be in the cell starting with torch_state_dict = dict(torch_model.state_dict()) located near the bottom. 
+The changes are outlined at the bottom of the cell.
+
+
 # Git Re-Basin: Merging Models modulo Permutation Symmetries
 
 ![Video demonstrating the effect of our permutation matching algorithm on the loss landscape throughout training.](mnist_video.gif)
