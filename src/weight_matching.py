@@ -71,7 +71,7 @@ def vgg16_permutation_spec() -> PermutationSpec:
 
 def resnet20_permutation_spec() -> PermutationSpec:
   conv = lambda name, p_in, p_out: {f"{name}/kernel": (None, None, p_in, p_out)}
-  norm = lambda name, p: {f"{name}/scale": (p, ), f"{name}/bias": (p, )}
+  norm = lambda name, p: {f"{name}/scale": (p, ), f"{name}/bias": (p, ), f"{name}/mean": (p, ), f"{name}/var": (p, )}
   dense = lambda name, p_in, p_out: {f"{name}/kernel": (p_in, p_out), f"{name}/bias": (p_out, )}
 
   # This is for easy blocks that use a residual connection, without any change in the number of channels.
