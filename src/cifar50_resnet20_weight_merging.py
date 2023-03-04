@@ -9,7 +9,7 @@ from flax.serialization import from_bytes
 from jax import random
 from tqdm import tqdm
 from scipy.optimize import linear_sum_assignment
-# from cifar100_resnet20_train import make_stuff
+from cifar100_resnet20_train import make_stuff
 from datasets import load_cifar100
 from resnet20 import BLOCKS_PER_GROUP, ResNet
 from utils import (ec2_get_instance_type, flatten_params, lerp, timeblock, unflatten_params)
@@ -27,6 +27,11 @@ import pdb
 
 from utils import rngmix
 
+import clip
+import torch
+import torch.nn as nn
+import numpy as np
+from torch.cuda.amp import autocast
 
 class PermutationSpec(NamedTuple):
     perm_to_axes: dict
@@ -172,15 +177,39 @@ def load_pickle(path):
     return pickle.load(open(path, 'rb'))
 
 
-a_sd = load_pickle(os.path.join(
-    '/srv/share/gstoica3/checkpoints/REPAIR',
-    'flax_cifar50_1.pkl'
-))
+def find_pairs(str_splits):
+    pairs = []
+    for i, str_split_i in enumerate(str_splits):
+        split_i = set([int(k) for k in str_split_i.split('_')])
+        for str_split_j in str_splits[i+1:]:
+            split_j = set([int(k) for k in str_split_j.split('_')])
+            if len(split_i.intersection(split_j)) == 0:
+                pairs.append((str_split_i, str_split_j))
+    return pairs
 
-b_sd = load_pickle(os.path.join(
-    '/srv/share/gstoica3/checkpoints/REPAIR',
-    'flax_cifar50_2.pkl'
-))
+
+def split_str_to_ints(split):
+    return [int(i) for i in split.split('_')]
+
+
+def is_valid_pair(model_dir, pair, model_type):
+    paths = os.listdir(os.path.join(model_dir, pair[0]))
+    for path in paths:
+        if model_type in path:
+            return True
+    return False
+
+
+model_dir = '/srv/share2/gstoica3/checkpoints/cifar50_traincliphead/'
+model_name = 'resnet20x4'
+eval_pair = 0
+pair = [pair for pair in find_pairs(os.listdir(model_dir)) if is_valid_pair(model_dir, pair, model_name)][eval_pair]
+model_save_paths = [os.path.join(model_dir, split, f'{model_name}_flax_v0.pkl') for split in pair]
+
+
+a_sd = load_pickle(os.path.join(model_save_paths[0]))
+
+b_sd = load_pickle(os.path.join(model_save_paths[1]))
 
 a_sd_union = flatten_params(a_sd['params'])
 a_sd_union.update(flatten_params(a_sd['batch_stats']))
@@ -198,9 +227,17 @@ final_permutation = weight_matching(
     b_sd_union
 )
 
-model_b_clever = unflatten_params(
-        apply_permutation(permutation_spec, final_permutation, flatten_params(b_sd_union)))
+model_b_params_clever = unflatten_params(apply_permutation(permutation_spec, final_permutation, flatten_params(b_sd['params'])))
+model_b_stats_clever = unflatten_params(apply_permutation(permutation_spec, final_permutation, flatten_params(b_sd['batch_stats'])))
+clever_params_sd = lerp(.5, a_sd['params'], model_b_params_clever.unfreeze())
+clever_stats_sd = lerp(.5, a_sd['batch_stats'], model_b_stats_clever.unfreeze())
+clever_p_sd = {'params': clever_params_sd, 'batch_stats': clever_stats_sd}
+train_ds, test_ds = load_cifar100()
 
-pickle.dump(model_b_clever, open('/srv/share/gstoica3/checkpoints/REPAIR/flax_cifar50_2_permuted_to_1.pkl', 'wb'))
-
-# pdb.set_trace()
+model = ResNet(blocks_per_group=BLOCKS_PER_GROUP["resnet20"], num_classes=512, width_multiplier=4)
+stuff = make_stuff(model)
+test_loss, test_acc1, test_acc5 = stuff["dataset_loss_and_accuracies"](clever_p_sd, test_ds, 1000)
+print('Acc: {}'.format(test_acc1))
+save_path = os.path.join(model_dir, pair[0], 'flax_cifar50_2_permuted_to_1.pkl')
+print(save_path)
+pickle.dump(clever_p_sd, open(save_path, 'wb'))

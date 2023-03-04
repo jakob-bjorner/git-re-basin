@@ -26,6 +26,25 @@ tf.config.set_visible_devices([], "GPU")
 
 NUM_CLASSES = 100
 
+import clip
+import torch
+from datasets import load_cifar100
+
+# train_ds, test_ds = load_cifar100()
+
+classes = ['apple', 'aquarium_fish', 'baby', 'bear', 'beaver', 'bed', 'bee', 'beetle', 'bicycle', 'bottle', 'bowl', 'boy', 'bridge', 'bus', 'butterfly', 'camel', 'can', 'castle', 'caterpillar', 'cattle', 'chair', 'chimpanzee', 'clock', 'cloud', 'cockroach', 'couch', 'crab', 'crocodile', 'cup', 'dinosaur', 'dolphin', 'elephant', 'flatfish', 'forest', 'fox', 'girl', 'hamster', 'house', 'kangaroo', 'keyboard', 'lamp', 'lawn_mower', 'leopard', 'lion', 'lizard', 'lobster', 'man', 'maple_tree', 'motorcycle', 'mountain', 'mouse', 'mushroom', 'oak_tree', 'orange', 'orchid', 'otter', 'palm_tree', 'pear', 'pickup_truck', 'pine_tree', 'plain', 'plate', 'poppy', 'porcupine', 'possum', 'rabbit', 'raccoon', 'ray', 'road', 'rocket', 'rose', 'sea', 'seal', 'shark', 'shrew', 'skunk', 'skyscraper', 'snail', 'snake', 'spider', 'squirrel', 'streetcar', 'sunflower', 'sweet_pepper', 'table', 'tank', 'telephone', 'television', 'tiger', 'tractor', 'train', 'trout', 'tulip', 'turtle', 'wardrobe', 'whale', 'willow_tree', 'wolf', 'woman', 'worm']
+
+
+text_inputs = torch.cat([clip.tokenize(f"a photo of a {c}") for c in classes]).to('cuda')
+model, preprocess = clip.load('ViT-B/32', 'cuda')
+with torch.no_grad():
+    text_features = model.encode_text(text_inputs)
+
+
+text_features /= text_features.norm(dim=-1, keepdim=True)
+text_features = text_features.cpu().numpy()
+
+
 def make_stuff(model):
   train_transform = augmax.Chain(
       # augmax does not seem to support random crops with padding. See https://github.com/khdlr/augmax/issues/6.
@@ -40,7 +59,10 @@ def make_stuff(model):
   def batch_eval(params, images_u8, labels):
     images_f32 = vmap(normalize_transform)(None, images_u8)
     y_onehot = jax.nn.one_hot(labels, NUM_CLASSES)
-    logits = model.apply({"params": params}, images_f32)
+    # logits = model.apply({"params": params}, images_f32) 
+    logits = model.apply(params, images_f32) 
+    logits /= jnp.linalg.norm(logits, axis=-1, keepdims=True)
+    logits = logits @ text_features.T
     l = jnp.mean(optax.softmax_cross_entropy(logits=logits, labels=y_onehot))
     top1_num_correct = jnp.sum(jnp.argmax(logits, axis=-1) == labels)
     # See https://github.com/google/jax/issues/2079. argpartition is not currently (2022-09-28) supported.
